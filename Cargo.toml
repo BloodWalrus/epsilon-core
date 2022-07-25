@@ -1,5 +1,5 @@
 [package]
-name = "epsilon-core"
+name = "ecore"
 version = "0.1.0"
 edition = "2021"
 
