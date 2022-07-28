@@ -17,7 +17,7 @@ impl<const N: usize, T> Connection<N, T> {
         }
     }
 
-    pub fn send(&mut self, frame: [T; N]) -> std::io::Result<()> {
+    pub fn send(&mut self, frame: &[T; N]) -> std::io::Result<()> {
         // cast &[T] into &[u8]
         let tmp = unsafe {
             std::slice::from_raw_parts(frame.as_ptr() as *const u8, std::mem::size_of::<[T; N]>())
