@@ -37,4 +37,8 @@ impl<const N: usize, T> Connection<N, T> {
 
         Ok(tmp)
     }
+
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.peer_addr()
+    }
 }
