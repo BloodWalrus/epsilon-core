@@ -1,7 +1,7 @@
 use std::{
     io::{Read, Write},
     marker::PhantomData,
-    net::TcpStream,
+    net::{SocketAddr, TcpStream},
 };
 
 pub struct Connection<const N: usize, T> {
@@ -38,7 +38,7 @@ impl<const N: usize, T> Connection<N, T> {
         Ok(tmp)
     }
 
-    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+    pub fn peer_addr(&self) -> std::io::Result<SocketAddr> {
         self.stream.peer_addr()
     }
 }
