@@ -1,4 +1,3 @@
 pub mod connection;
-pub mod maths;
-pub mod skeleton;
-pub mod tree;
+
+pub type EpsilonResult<T> = Result<T, Box<dyn std::error::Error>>;
