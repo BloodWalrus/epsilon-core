@@ -4,7 +4,7 @@ use std::{
     io::{Read, Write},
     marker::PhantomData,
     mem::size_of,
-    net::{SocketAddr, TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
 };
 
 use crate::EpsilonResult;
@@ -17,7 +17,7 @@ pub struct Streamer<T, const T_SIZE: usize> {
 
 impl<T: Copy, const T_SIZE: usize> Streamer<T, T_SIZE> {
     // add results
-    pub fn listen(socket: SocketAddr) -> EpsilonResult<Self> {
+    pub fn listen<P: ToSocketAddrs>(socket: P) -> EpsilonResult<Self> {
         Ok(Self {
             listener: TcpListener::bind(socket)?,
             stream: None,
@@ -77,7 +77,7 @@ pub struct Client<T, const T_SIZE: usize> {
 
 impl<T: Copy, const T_SIZE: usize> Client<T, T_SIZE> {
     // add results
-    pub fn connect(socket: SocketAddr) -> EpsilonResult<Self> {
+    pub fn connect<P: ToSocketAddrs>(socket: P) -> EpsilonResult<Self> {
         let mut _self = Self {
             stream: TcpStream::connect(socket)?,
             _marker: PhantomData,
