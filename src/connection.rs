@@ -107,8 +107,8 @@ impl<T: Copy, const T_SIZE: usize> Client<T, T_SIZE> {
 trait GenerateTransferTypeSignature<T> {
     fn generate_transfer_type_signature(&self) -> TransferTypeSignature {
         TransferTypeSignature {
-            size: size_of::<T>(),
-            align: std::mem::align_of::<T>(),
+            size: size_of::<T>() as u32,
+            align: std::mem::align_of::<T>() as u32,
         }
     }
 }
@@ -124,8 +124,8 @@ pub union Converter<T: Copy, const SIZE: usize> {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct TransferTypeSignature {
-    pub size: usize,
-    pub align: usize,
+    pub size: u32,
+    pub align: u32,
 }
 
 ///////////////////////////////////////////////////////////////////
