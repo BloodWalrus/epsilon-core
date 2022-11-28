@@ -1,147 +1,98 @@
 use std::{
-    error::Error,
-    fmt::Display,
-    io::{Read, Write},
+    io::{self, Read, Write},
     marker::PhantomData,
-    mem::size_of,
-    net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
+    mem::{size_of, zeroed},
+    net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
-use crate::EpsilonResult;
-
-pub struct Streamer<T, const T_SIZE: usize> {
-    listener: TcpListener,
-    stream: Option<TcpStream>,
+pub struct Incomming<'a, T> {
+    listener: &'a TcpListener,
     _marker: PhantomData<T>,
 }
 
-impl<T: Copy, const T_SIZE: usize> Streamer<T, T_SIZE> {
-    // add results
-    pub fn listen<P: ToSocketAddrs>(socket: P) -> EpsilonResult<Self> {
-        Ok(Self {
-            listener: TcpListener::bind(socket)?,
-            stream: None,
-            _marker: PhantomData,
-        })
-    }
+impl<'a, T> Iterator for Incomming<'a, T> {
+    type Item = Stream<T>;
 
-    /// connectes to the next valid incomming client
-    /// this will block until the next client, and return Ok(()) if succesful
-    pub fn next_client(&mut self) -> EpsilonResult<()> {
-        let stream = loop {
-            let (mut stream, socket) = self.listener.accept()?;
-            eprintln!("checking transfer type signature of {:?}", socket);
-
-            let mut transfer_signature = [0u8; size_of::<TransferTypeSignature>()];
-
-            stream.read_exact(&mut transfer_signature)?;
-
-            let converter = Converter {
-                data: transfer_signature,
-            };
-
-            if self.connecting_transfer_type_signature_matches_local(unsafe { converter.value }) {
-                break stream;
-            }
-        };
-
-        self.stream = Some(stream);
-
-        Ok(())
-    }
-
-    fn connecting_transfer_type_signature_matches_local(
-        &self,
-        transfer_type_signature: TransferTypeSignature,
-    ) -> bool {
-        self.generate_transfer_type_signature() == transfer_type_signature
-    }
-
-    pub fn send(&mut self, item: T) -> EpsilonResult<()> {
-        if let Some(stream) = &mut self.stream {
-            let converter: Converter<T, T_SIZE> = Converter { value: item };
-
-            stream.write_all(unsafe { &converter.data })?;
-
-            Ok(())
-        } else {
-            Err(Box::new(StreamerError::NoClientConnected))
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.listener.accept().map(|(stream, _)| stream) {
+            Ok(stream) => Some(Stream::from_tcpstream(stream)),
+            Err(_) => None,
         }
     }
 }
 
-pub struct Client<T, const T_SIZE: usize> {
+pub struct Listener<T> {
+    listener: TcpListener,
+    _marker: PhantomData<T>,
+}
+
+impl<T> Listener<T> {
+    // add results
+    pub fn listen<P: ToSocketAddrs>(socket: P) -> io::Result<Self> {
+        Ok(Self {
+            listener: TcpListener::bind(socket)?,
+            _marker: PhantomData,
+        })
+    }
+
+    pub fn incomming(&self) -> Incomming<'_, T> {
+        Incomming {
+            listener: &self.listener,
+            _marker: PhantomData,
+        }
+    }
+}
+
+pub struct Stream<T> {
     stream: TcpStream,
     _marker: PhantomData<T>,
 }
 
-impl<T: Copy, const T_SIZE: usize> Client<T, T_SIZE> {
+impl<T> Stream<T> {
     // add results
-    pub fn connect<P: ToSocketAddrs>(socket: P) -> EpsilonResult<Self> {
-        let mut _self = Self {
-            stream: TcpStream::connect(socket)?,
+    pub fn connect<P: ToSocketAddrs>(socket: P) -> io::Result<Self> {
+        Ok(Self::from_tcpstream(TcpStream::connect(socket)?))
+    }
+
+    pub(crate) fn from_tcpstream(stream: TcpStream) -> Self {
+        Self {
+            stream,
             _marker: PhantomData,
-        };
-
-        const SIZE: usize = size_of::<TransferTypeSignature>();
-        let converter: Converter<TransferTypeSignature, SIZE> = Converter {
-            value: _self.generate_transfer_type_signature(),
-        };
-
-        _self.stream.write_all(unsafe { &converter.data })?;
-
-        Ok(_self)
+        }
     }
 
-    pub fn recv(&mut self) -> EpsilonResult<T> {
-        let mut converter: Converter<T, T_SIZE> = Converter {
-            data: [0u8; T_SIZE],
-        };
+    pub fn send(&mut self, item: &T) -> io::Result<()> {
+        self.stream.set_nonblocking(false)?;
+        self.stream.write_all(unsafe { as_bytes(item) })?;
 
-        self.stream.read_exact(unsafe { &mut converter.data })?;
-
-        Ok(unsafe { converter.value })
+        Ok(())
     }
-}
 
-trait GenerateTransferTypeSignature<T> {
-    fn generate_transfer_type_signature(&self) -> TransferTypeSignature {
-        TransferTypeSignature {
-            size: size_of::<T>() as u32,
-            align: std::mem::align_of::<T>() as u32,
+    pub fn recv(&mut self) -> io::Result<T> {
+        self.stream.set_nonblocking(false)?;
+        let mut tmp: T = unsafe { zeroed() };
+        self.stream.read_exact(unsafe { as_bytes_mut(&mut tmp) })?;
+
+        Ok(tmp)
+    }
+
+    pub fn try_recv(&mut self) -> io::Result<Option<T>> {
+        self.stream.set_nonblocking(true)?;
+        let mut tmp: T = unsafe { zeroed() };
+        match self.stream.read_exact(unsafe { as_bytes_mut(&mut tmp) }) {
+            Ok(_) => Ok(Some(tmp)),
+            Err(err) => match err.kind() {
+                io::ErrorKind::WouldBlock => Ok(None),
+                _ => Err(err),
+            },
         }
     }
 }
 
-impl<T, const T_SIZE: usize> GenerateTransferTypeSignature<T> for Streamer<T, T_SIZE> {}
-
-impl<T, const T_SIZE: usize> GenerateTransferTypeSignature<T> for Client<T, T_SIZE> {}
-
-pub union Converter<T: Copy, const SIZE: usize> {
-    pub value: T,
-    pub data: [u8; SIZE],
+unsafe fn as_bytes<'a, T: Sized>(value: &'a T) -> &'a [u8] {
+    std::slice::from_raw_parts(value as *const T as *const u8, size_of::<T>())
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct TransferTypeSignature {
-    pub size: u32,
-    pub align: u32,
+unsafe fn as_bytes_mut<'a, T: Sized>(value: &'a mut T) -> &'a mut [u8] {
+    std::slice::from_raw_parts_mut(value as *mut T as *mut u8, size_of::<T>())
 }
-
-///////////////////////////////////////////////////////////////////
-// Errors
-
-#[derive(Debug, Clone, Copy)]
-pub enum StreamerError {
-    NoClientConnected,
-}
-
-impl Display for StreamerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            StreamerError::NoClientConnected => "no client connected",
-        })
-    }
-}
-
-impl Error for StreamerError {}
