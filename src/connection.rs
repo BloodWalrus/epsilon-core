@@ -5,6 +5,13 @@ use std::{
     net::{TcpListener, TcpStream, ToSocketAddrs},
 };
 
+#[repr(u8)]
+pub enum CtrlSignal {
+    Start,
+    Stop,
+    Reset,
+}
+
 pub struct Incomming<'a, T> {
     listener: &'a TcpListener,
     _marker: PhantomData<T>,
