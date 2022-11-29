@@ -22,7 +22,10 @@ impl<'a, T> Iterator for Incomming<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.listener.accept().map(|(stream, _)| stream) {
-            Ok(stream) => Some(Stream::from_tcpstream(stream)),
+            Ok(stream) => match Stream::from_tcpstream(stream) {
+                Ok(stream) => Some(stream),
+                Err(_) => None,
+            },
             Err(_) => None,
         }
     }
@@ -58,19 +61,21 @@ pub struct Stream<T> {
 impl<T> Stream<T> {
     // add results
     pub fn connect<P: ToSocketAddrs>(socket: P) -> io::Result<Self> {
-        Ok(Self::from_tcpstream(TcpStream::connect(socket)?))
+        Ok(Self::from_tcpstream(TcpStream::connect(socket)?)?)
     }
 
-    pub(crate) fn from_tcpstream(stream: TcpStream) -> Self {
-        Self {
+    pub(crate) fn from_tcpstream(stream: TcpStream) -> io::Result<Self> {
+        stream.set_nodelay(true)?;
+        Ok(Self {
             stream,
             _marker: PhantomData,
-        }
+        })
     }
 
     pub fn send(&mut self, item: &T) -> io::Result<()> {
         self.stream.set_nonblocking(false)?;
         self.stream.write_all(unsafe { as_bytes(item) })?;
+        self.stream.flush()?;
 
         Ok(())
     }
